@@ -139,8 +139,9 @@ type Response struct {
 	Err error
 }
 
-// Processor processes "in" and returns "data" that will be send to the channel labelled "out".  If err != nil,
-// "out" is not sent to and further processing of this request is stopped.
+// Processor processes data represented by "in".  Returned data will either be used
+// as input into the next Stage or if the last Stage, returned to the user. If err != nil,
+// further processing of this request is stopped.
 type Processor func(ctx context.Context, in interface{}) (data interface{}, err error)
 
 // Stage represents a stage in the pipeline. A Stage takes input from an input channel, calls a Processor on the data,
