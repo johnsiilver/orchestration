@@ -1,8 +1,12 @@
 /*
-This is really the wrong use case for this type of Pipeline, but I wanted to see if I could make it work
-and wanted to test various error conditions I knew I would discover while I wrote out all the enumerators.
+DON'T USE THIS EXAMPLE FOR PROMISE....
 
-This allowed me to bug fix some bugs in the promise package.
+This data processing is better achieved using the same example in the streaming/ package.
+
+This is here because I wanted to see if I could make it work and to test various error conditions I knew I
+would discover while I wrote out all the enumerators.
+
+This allowed me to bug fix some bugs in the promise package and underlying packages.
 
 WHAT THIS DOES:
 

@@ -1,8 +1,9 @@
-package main
+package pipeline
 
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 /*
@@ -46,9 +47,10 @@ type SmokingStatus int8
 
 const (
 	SmokingStatusUnknown SmokingStatus = 0
-	Smoked SmokingStatus = 1
-	NeverSmoked SmokingStatus = 2
-	Smokes SmokingStatus = 3
+	Smoked               SmokingStatus = 1
+	NeverSmoked          SmokingStatus = 2
+	Smokes               SmokingStatus = 3
+	FormerlySmoked       SmokingStatus = 4
 )
 
 func (s *SmokingStatus) Unmarshal(str string) error {
@@ -62,41 +64,50 @@ func (s *SmokingStatus) Unmarshal(str string) error {
 	case "smokes":
 		*s = Smokes
 		return nil
+	case "formerly smoked":
+		*s = FormerlySmoked
+		return nil
 	case "Unknown":
 		return nil
 	}
-	return fmt.Errorf("SmokingStatus(%s) is an unknown type", s)
+	return fmt.Errorf("SmokingStatus(%s) is an unknown type", str)
 }
 
 type WorkType int8
 
 const (
-        WorkTypeUnknown WorkType = 0
-        Private WorkType = 1
-        SelfEmployed WorkType = 2
-        Govtjob WorkType = 3
+	WorkTypeUnknown WorkType = 0
+	Private         WorkType = 1
+	SelfEmployed    WorkType = 2
+	Govtjob         WorkType = 3
+	Parent          WorkType = 4
+	NeverEmployed   WorkType = 5
 )
 
 func (w *WorkType) Unmarshal(s string) error {
-        switch s {
-        case "Private":
-                *w = Private
-        case "Self-employed":
-                *w = SelfEmployed
-        case "Govt_job":
-                *w = Govtjob
-        default:
-                return fmt.Errorf("WorkType(%s) is an unknown value", s)
-        }
-        return nil
+	switch s {
+	case "Private":
+		*w = Private
+	case "Self-employed":
+		*w = SelfEmployed
+	case "Govt_job":
+		*w = Govtjob
+	case "children":
+		*w = Parent
+	case "Never_worked":
+		*w = NeverEmployed
+	default:
+		return fmt.Errorf("WorkType(%s) is an unknown value", s)
+	}
+	return nil
 }
 
 type Residence int8
 
 const (
-	ResidenceUnknown  Residence = 0
-	Urban Residence = 1
-	Rural Residence = 2
+	ResidenceUnknown Residence = 0
+	Urban            Residence = 1
+	Rural            Residence = 2
 )
 
 func (r *Residence) Unmarshal(s string) error {
@@ -111,22 +122,22 @@ func (r *Residence) Unmarshal(s string) error {
 	return nil
 }
 
-
 type Sex int8
 
 const (
 	SexUnknown Sex = 0
-	Male Sex = 1
-	Female Sex = 2
+	Male       Sex = 1
+	Female     Sex = 2
+	SexOther       = 3
 )
 
 type Conditions struct {
-	HyperTension bool
-	HeartDisease bool
-	GlucoseLevel float64
-	BMI float64
+	HyperTension  bool
+	HeartDisease  bool
+	GlucoseLevel  float64
+	BMI           float64
 	SmokingStatus SmokingStatus
-	NumStrokes int
+	PrevStroke    bool
 }
 
 func (c *Conditions) Unmarshal(line []string) error {
@@ -148,11 +159,13 @@ func (c *Conditions) Unmarshal(line []string) error {
 	}
 	c.GlucoseLevel = f
 
-	f, err = strconv.ParseFloat(line[bmi], 64)
-	if err != nil {
-		return fmt.Errorf("BMI(%s): %s", line[bmi], err)
+	if line[bmi] != "N/A" {
+		f, err = strconv.ParseFloat(line[bmi], 64)
+		if err != nil {
+			return fmt.Errorf("BMI(%s): %s", line[bmi], err)
+		}
+		c.BMI = f
 	}
-	c.BMI = f
 
 	if err = c.SmokingStatus.Unmarshal(line[smoking_status]); err != nil {
 		return err
@@ -162,7 +175,13 @@ func (c *Conditions) Unmarshal(line []string) error {
 	if err != nil {
 		return fmt.Errorf("Stroke(%s): %s", line[stroke], err)
 	}
-	c.NumStrokes = d
+	switch d {
+	case 0:
+	case 1:
+		c.PrevStroke = true
+	default:
+		return fmt.Errorf("PrevStroke was %d, which we don't recognize", d)
+	}
 
 	return nil
 }
@@ -182,8 +201,8 @@ func boolConv(s string) (bool, error) {
 }
 
 type Social struct {
-	Married bool
-	WorkType WorkType
+	Married   bool
+	WorkType  WorkType
 	Residence Residence
 }
 
@@ -205,18 +224,18 @@ func (s *Social) Unmarshal(line []string) error {
 }
 
 type Victim struct {
-	ID int
+	ID  int
 	Sex Sex
-	Age int
+	Age float64
 
 	Conditions Conditions
-	Social Social
+	Social     Social
 }
 
-func (v *Victim) Unmarshal(line []string) error {
+func (v *Victim) Unmarshal(line []string) (Victim, error) {
 	d, err := strconv.Atoi(line[id])
 	if err != nil {
-		return fmt.Errorf("id(%s) was not a number", line[id])
+		return Victim{}, fmt.Errorf("id(%s) was not a number", line[id])
 	}
 	v.ID = d
 
@@ -226,44 +245,46 @@ func (v *Victim) Unmarshal(line []string) error {
 		v.Sex = Male
 	case "Female":
 		v.Sex = Female
+	case "Other":
+		v.Sex = SexOther
 	default:
-		return fmt.Errorf("gender(%s) was unknown vlaue", line[gender])
+		return Victim{}, fmt.Errorf("gender(%s) was unknown vlaue", line[gender])
 	}
 
-	d, err = strconv.Atoi(line[age])
+	f, err := strconv.ParseFloat(line[age], 64)
 	if err != nil {
-		return fmt.Errorf("age(%s) was not a number", line[age])
+		return Victim{}, fmt.Errorf("age(%s) was not a number: %v", line[age], strings.Join(line, ", "))
 	}
-	v.Age = d
+	v.Age = f
 
 	social := Social{}
 	if err := social.Unmarshal(line); err != nil {
-		return err
+		return Victim{}, err
 	}
 	v.Social = social
 
 	conditions := Conditions{}
 	if err := conditions.Unmarshal(line); err != nil {
-		return err
+		return Victim{}, err
 	}
 	v.Conditions = conditions
-	return nil
+	return *v, nil
 }
 
 type Stats struct {
-	Victims int32
-	Males int32
-	Females int32
-	MalesWithGreaterThanOne int32
+	Victims                   int32
+	Males                     int32
+	Females                   int32
+	MalesWithGreaterThanOne   int32
 	FemalesWithGreaterThanOne int32
-	PercentMalesMarried float64
-	PrecentFemalesMarried float64
+	PercentMalesMarried       float64
+	PrecentFemalesMarried     float64
 
-	malesMarried int32
+	malesMarried   int32
 	femalesMarried int32
 }
 
 func (s *Stats) Finalize() {
-	s.PercentMalesMarried = float64(s.Males)/float64(s.malesMarried)
-	s.PrecentFemalesMarried = float64(s.Females)/float64(s.femalesMarried)
+	s.PercentMalesMarried = (float64(s.malesMarried) / float64(s.Males)) * 100
+	s.PrecentFemalesMarried = (float64(s.femalesMarried) / float64(s.Females)) * 100
 }

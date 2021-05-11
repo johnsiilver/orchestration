@@ -107,7 +107,7 @@ func csvToPipeline(a args) chan promise.Request {
 		r.Read()
 
 		// Read all the csv lines and send them into the processing pipeline.
-		for i := 0; i < 1; i++ {
+		for {
 			// If we see an error, that means the pipeline had
 			// a failure. Since we are using this pipeline as
 			// all or nothing, we can just stop processing.

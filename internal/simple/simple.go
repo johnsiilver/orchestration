@@ -41,17 +41,21 @@ type Request struct {
 	// resp is the channel that handles the response.
 	resp chan Response
 
+	wg *sync.WaitGroup
+
+	// respShared indicates if the resp chan is being used by several Request objects.
 	respShared bool
-	//once *sync.Once
 }
 
+// ReqOption is an option for constructing a new Request via NewRequest().
 type ReqOption func(r Request) Request
 
 // SharedResponse allows you to pass a channel to multiple request objects and have each output their result
 // to the same channel. Without this, each Request.Response() gives a different channel.
-func SharedResponse(ch chan Response) ReqOption {
+func SharedResponse(ch chan Response, wg *sync.WaitGroup) ReqOption {
 	return func(r Request) Request {
 		r.resp = ch
+		r.wg = wg
 		return r
 	}
 }
@@ -100,10 +104,29 @@ func (r Request) Recycle() {
 	respChanPool.Put(r.resp)
 }
 
-func (r Request) respond(resp Response) <-chan struct{} {
+// respond sends a response on the req.resp channel. If async is set, this channel
+// will return before the response is sent. The returned channel is closed once
+// the response has been sent.
+func (r Request) respond(resp Response, async bool) <-chan struct{} {
 	done := make(chan struct{})
-	defer close(done)
 
+	// Handle respond is async.
+	if async {
+		go func() {
+			defer close(done)
+			if r.wg != nil {
+				defer r.wg.Done()
+			}
+			r.resp <- resp
+		}()
+		return done
+	}
+
+	// Handle if it is syncronous.
+	defer close(done)
+	if r.wg != nil {
+		defer r.wg.Done()
+	}
 	r.resp <- resp
 	return done
 }
@@ -130,9 +153,8 @@ type Stage struct {
 	in          chan Request
 	out         chan Request
 
-	startStage bool
-	stagesWG   *sync.WaitGroup
-	stageWG    *sync.WaitGroup
+	stagesWG *sync.WaitGroup
+	stageWG  *sync.WaitGroup
 }
 
 // NewStage spins off concurrency procs taking data from an input channel and sending it to an output channel.
@@ -159,36 +181,38 @@ func (s Stage) start() {
 			defer s.stageWG.Done()
 
 			for req := range s.in {
-				func() {
-					span := trace.SpanFromContext(req.ctx)
-					span.AddEvent(fmt.Sprintf("Pipeline stage(%s) received request", s.name))
-
-					if err := req.ctx.Err(); err != nil {
-						req.respond(Response{Err: err})
-						span.AddEvent("Request error", trace.WithAttributes(attribute.String("error", err.Error())))
-						return
-					}
-
-					result, err := s.proc(req.ctx, req.data)
-					if err != nil {
-						req.cancel()
-						span.AddEvent("Proc error", trace.WithAttributes(attribute.String("error", err.Error())))
-						go doErrResp(req, err)
-						return
-					}
-
-					if s.out == nil { // We are the last stage
-						req.respond(Response{Data: result})
-						span.AddEvent("Emit result to user")
-						return
-					}
-					req.data = result
-					s.out <- req
-					span.AddEvent("Send to next stage")
-				}()
+				s.handleRequest(req)
 			}
 		}()
 	}
+}
+
+func (s Stage) handleRequest(req Request) {
+	span := trace.SpanFromContext(req.ctx)
+	span.AddEvent(fmt.Sprintf("Pipeline stage(%s) received request", s.name))
+
+	if err := req.ctx.Err(); err != nil {
+		req.respond(Response{Err: err}, false)
+		span.AddEvent("Request error", trace.WithAttributes(attribute.String("error", err.Error())))
+		return
+	}
+
+	result, err := s.proc(req.ctx, req.data)
+	if err != nil {
+		req.cancel()
+		span.AddEvent("Proc error", trace.WithAttributes(attribute.String("error", err.Error())))
+		go doErrResp(req, err)
+		return
+	}
+
+	if s.out == nil { // We are the last stage
+		req.respond(Response{Data: result}, false)
+		span.AddEvent("Emit result to user")
+		return
+	}
+	req.data = result
+	s.out <- req
+	span.AddEvent("Send to next stage")
 }
 
 // doErrResp sends an error on a channel. This is only useful when we are using a shared output channel that
@@ -196,7 +220,7 @@ func (s Stage) start() {
 func doErrResp(req Request, err error) {
 	timer := time.NewTimer(10 * time.Second)
 	select {
-	case <-req.respond(Response{Err: err}):
+	case <-req.respond(Response{Err: err}, true):
 	case <-timer.C:
 	}
 	timer.Stop()
