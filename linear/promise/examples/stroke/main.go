@@ -23,7 +23,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/johnsiilver/orchestration/general/promise/examples/stroke/pipeline"
+	"github.com/johnsiilver/orchestration/linear/promise/examples/stroke/pipeline"
 	"github.com/kylelemons/godebug/pretty"
 )
 

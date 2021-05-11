@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-	//"log"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"

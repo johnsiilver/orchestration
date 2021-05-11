@@ -12,8 +12,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/johnsiilver/orchestration/general/streaming"
-	"github.com/johnsiilver/orchestration/general/streaming/examples/stroke/pipeline"
+	"github.com/johnsiilver/orchestration/linear/streaming"
+	"github.com/johnsiilver/orchestration/linear/streaming/examples/stroke/pipeline"
 	"github.com/kylelemons/godebug/pretty"
 )
 

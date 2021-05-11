@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/johnsiilver/orchestration/general/streaming"
+	"github.com/johnsiilver/orchestration/linear/streaming"
 )
 
 var stats *Stats

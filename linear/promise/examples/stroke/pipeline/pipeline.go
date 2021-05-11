@@ -20,7 +20,7 @@ import (
 	"io"
 	"runtime"
 
-	"github.com/johnsiilver/orchestration/general/promise"
+	"github.com/johnsiilver/orchestration/linear/promise"
 )
 
 //go:embed healthcare-dataset-stroke-data.csv

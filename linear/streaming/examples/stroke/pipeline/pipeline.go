@@ -12,7 +12,7 @@ import (
 	"io"
 	"runtime"
 
-	"github.com/johnsiilver/orchestration/general/streaming"
+	"github.com/johnsiilver/orchestration/linear/streaming"
 )
 
 //go:embed healthcare-dataset-stroke-data.csv
