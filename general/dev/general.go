@@ -6,7 +6,7 @@ The designation of simple is an indication that this orchestrator has no decisio
 multiple different processors or syncronization points. This orchestrator shines when you need to hit
 each stage in order and the only branching is when there is an error.
 
-However, don't let the "simple" designation fool you. This can do complex parallel operation pipelines 
+However, don't let the "simple" designation fool you. This can do complex parallel operation pipelines
 concurrently at low memory and high speed.
 */
 package simple
@@ -78,10 +78,10 @@ type Processor func(ctx context.Context, in interface{}) (data interface{}, err 
 type Stage struct {
 	name        string
 	proc        Processor
-	nextStage string
+	nextStage   string
 	concurrency int
-	in chan Request
-	out chan Request
+	in          chan Request
+	out         chan Request
 }
 
 // NewStage spins off concurrency procs taking data from an input channel and sending it to an output channel.
@@ -125,7 +125,7 @@ func doErrResp(req Request, err error) {
 	timer := time.NewTimer(10 * time.Second)
 	defer timer.Stop()
 
-	select{
+	select {
 	case req.resp <- Response{Err: err}:
 	case <-timer.C:
 	}

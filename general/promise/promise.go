@@ -4,17 +4,29 @@ Package promise provides a processing pipeline where every input results in a re
 This package is useful when each request represents a single request and not a single part of something
 like a data processing pipeline. A good use case is a pipeline to handle RPC requests.
 
+Let's define some terms:
+
+	Promise: An object that will have the result of the Pipeline's processing at some future point.
+	Stage: A section of the Pipeline that uses a Processor to operate on input data and outputs data or an error.
+	Processor: A function that operates on input data and outputs data or an error for the next stage or the user.
+
+	- A Pipeline is created with New() and you use AddStage() to add Stages to the Pipeline. Stages execute in the order added.
+	- Each Stage must expect on its input the output of the last Stage.
+	- Any error stops execution of that request and returns a Response with an error.
+	- Movement through the Pipeline is linear, aka you always go through all stages in order.
+
+
 A GRPC Example:
 
-	// GRPCService is a mock of a a Go struct that implements a GRPC service.
+	// GRPCService is a mock of a Go struct that implements a GRPC service.
 	type GRPCService struct {
 		...
 		in chan Request
 		...
 	}
 
-	// New is the constructor for GRPCService. 
-	func New() (*GRPCService, error) {
+	// New is the constructor for GRPCService.
+	func NewGRPCService() (*GRPCService, error) {
 		// We are going to create multiple Pipelines that share the same input channel to service
 		// our requests concurrently. Each Pipeline may have parallel processing of stages.
 		numPipelines = runtime.NumCPU()
@@ -40,8 +52,10 @@ A GRPC Example:
 
 	// Method represents some GRPC method that will be called.
 	func (g *GRPCService) Method(ctx context.Context, input *pb.Request) (*pb.Response, error) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
 		// Make the Pipeline Request object based on the input.
-		req, err := promise.NewRequest(ctx, input)
+		req, err := promise.NewRequest(ctx, cancel, input)
 		if err != nil {
 			return nil, err
 		}
@@ -80,9 +94,11 @@ import (
 type Request = simple.Request
 
 // NewRequest is the constructor for Request.
-func NewRequest(ctx context.Context, data interface{}) (Request, error) {
-	return simple.NewRequest(ctx, data)
+func NewRequest(ctx context.Context, cancel context.CancelFunc, data interface{}) (Request, error) {
+	return simple.NewRequest(ctx, cancel, data)
 }
+
+type Response = simple.Response
 
 // Processor processes data sent to it in a stage.
 type Processor = simple.Processor
@@ -96,7 +112,7 @@ func NewStage(name string, proc Processor, concurrency int) Stage {
 	return simple.NewStage(name, proc, concurrency)
 }
 
-// Pipeline represents a data processing pipeline that returns results as promises to Requests. 
+// Pipeline represents a data processing pipeline that returns results as promises to Requests.
 type Pipeline struct {
 	pipe *simple.Pipeline
 }
@@ -104,8 +120,8 @@ type Pipeline struct {
 // AddStage adds a new stage that will do processing in the order they will be executed. The first stage
 // added will receive input from the "in" channel passed to New() and the last will output to the Response
 // channel that is in the request.
-func (p *Pipeline) AddStage(s Stage) error {
-	return p.pipe.AddStage(s)
+func (p *Pipeline) AddStage(s ...Stage) error {
+	return p.pipe.AddStage(s...)
 }
 
 // Start starts the pipeline.

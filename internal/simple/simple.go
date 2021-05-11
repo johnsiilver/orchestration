@@ -16,10 +16,17 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	//"log"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
+
+var respChanPool = sync.Pool{
+	New: func() interface{} {
+		return make(chan Response, 1)
+	},
+}
 
 // Request is the request object that enters the pipeline.
 type Request struct {
@@ -33,35 +40,42 @@ type Request struct {
 
 	// resp is the channel that handles the response.
 	resp chan Response
+
+	respShared bool
+	//once *sync.Once
 }
 
-type ReqOption func(r *Request)
+type ReqOption func(r Request) Request
 
 // SharedResponse allows you to pass a channel to multiple request objects and have each output their result
 // to the same channel. Without this, each Request.Response() gives a different channel.
 func SharedResponse(ch chan Response) ReqOption {
-	return func(r *Request) {
+	return func(r Request) Request {
 		r.resp = ch
+		return r
 	}
 }
 
 // NewRequest makes a new Request object. Data is the data you are sending to the Pipeline and counter is representing
 // a series of requests that you must increment before sending.
-func NewRequest(ctx context.Context, data interface{}, options ...ReqOption) (Request, error) {
+func NewRequest(ctx context.Context, cancel context.CancelFunc, data interface{}, options ...ReqOption) (Request, error) {
+	// BenchmarkNewRequest-16           4447377               272.9 ns/op           160 B/op          3 allocs/op
+	// 2 allocs seem to be for the response channel. .Recycle() should help with that.
 	if ctx == nil {
 		return Request{}, fmt.Errorf("cannot pass nil context")
 	}
 	if data == nil {
 		return Request{}, fmt.Errorf("cannot pass nil data")
 	}
-	ctx, cancel := context.WithCancel(ctx)
 
-	r := Request{ctx: ctx, cancel: cancel, data: data}
+	r := Request{ctx: ctx, cancel: cancel, data: data} //once: &sync.Once{}
 	for _, o := range options {
-		o(&r)
+		r = o(r)
 	}
 	if r.resp == nil {
-		r.resp = make(chan Response, 1)
+		r.resp = respChanPool.Get().(chan Response)
+	} else {
+		r.respShared = true
 	}
 
 	return r, nil
@@ -71,6 +85,27 @@ func NewRequest(ctx context.Context, data interface{}, options ...ReqOption) (Re
 // Pipeline, this may be a single channel for all responses or an individual Request's promise.
 func (r Request) Response() <-chan Response {
 	return r.resp
+}
+
+// Recycle can be called once you are no longer using the Response object. The Request must not use the channel
+// returned by Response() after this.
+func (r Request) Recycle() {
+	if r.respShared { // We never want to recycle a shared chan Response
+		return
+	}
+	select {
+	case <-r.resp:
+	default:
+	}
+	respChanPool.Put(r.resp)
+}
+
+func (r Request) respond(resp Response) <-chan struct{} {
+	done := make(chan struct{})
+	defer close(done)
+
+	r.resp <- resp
+	return done
 }
 
 // Repsone is the response from a pipeline.
@@ -126,8 +161,10 @@ func (s Stage) start() {
 			for req := range s.in {
 				func() {
 					span := trace.SpanFromContext(req.ctx)
+					span.AddEvent(fmt.Sprintf("Pipeline stage(%s) received request", s.name))
 
 					if err := req.ctx.Err(); err != nil {
+						req.respond(Response{Err: err})
 						span.AddEvent("Request error", trace.WithAttributes(attribute.String("error", err.Error())))
 						return
 					}
@@ -140,8 +177,8 @@ func (s Stage) start() {
 						return
 					}
 
-					if s.out == nil { // We are the last stage, so
-						req.resp <- Response{Data: result}
+					if s.out == nil { // We are the last stage
+						req.respond(Response{Data: result})
 						span.AddEvent("Emit result to user")
 						return
 					}
@@ -154,14 +191,15 @@ func (s Stage) start() {
 	}
 }
 
+// doErrResp sends an error on a channel. This is only useful when we are using a shared output channel that
+// can get backed up.
 func doErrResp(req Request, err error) {
 	timer := time.NewTimer(10 * time.Second)
-	defer timer.Stop()
-
 	select {
-	case req.resp <- Response{Err: err}:
+	case <-req.respond(Response{Err: err}):
 	case <-timer.C:
 	}
+	timer.Stop()
 }
 
 // Pipeline is an orchestration pipeline for doing doing operations based on a request flow.
@@ -260,7 +298,4 @@ func (p *Pipeline) stageKiller() {
 // signfied by all Stages to have exited.
 func (p *Pipeline) Wait() {
 	p.stagesWG.Wait()
-}
-
-type tracer interface {
 }

@@ -64,7 +64,8 @@ func TestETOEPromiseMode(t *testing.T) {
 				defer close(out)
 
 				for x := 0; x < 10; x++ {
-					req, err := NewRequest(context.Background(), Record{Num: x})
+					ctx, cancel := context.WithCancel(context.Background())
+					req, err := NewRequest(ctx, cancel, Record{Num: x})
 					if err != nil {
 						panic(err)
 					}

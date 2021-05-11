@@ -1,6 +1,6 @@
 module github.com/johnsiilver/orchestration
 
-go 1.15
+go 1.16
 
 require (
 	github.com/kylelemons/godebug v1.1.0
