@@ -12,7 +12,7 @@ These packages are designed around the "concurrency isn't parallelism" idea, but
 
 ## Concurrent AND Parallel
 
-![Basic Pipeline Diagram](https://github.com/johnsiilver/orchestration/raw/ecac4fab28aa/general/pipeline.png)
+![Basic Pipeline Diagram](https://github.com/johnsiilver/orchestration/blob/main/general/pipline.png?raw=true)
 
 The packages here are both concurrent and parallel.  You can create multiple of the same pipeline with a shared input channel (and output in the case of the streaming package).
 
